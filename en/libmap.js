@@ -131,9 +131,9 @@ window.LIBRARY_CONFIG = [
         title: 'Marx & Engels Collected Works (From wikirouge.net)',
         desc: 'Marx & Engels Collected Works English edition, Vol.1–50 (From wikirouge.net)',
         basepath: '/MECW/',
-        stylesheets: ['/en/MECW/MECW.css'],
+        stylesheets: ['/MECW/MECW.css'],
         badge: 'EN',
-        path: '/index.html#MECW',
+        path: '/MECW/index.html#MECW',
         groups: [
             {
                 label: 'Works (Vol.1–27)',
