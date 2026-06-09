@@ -6,18 +6,28 @@
         "statusCode": 302
       },
       {
-        "source": "/ru",
-        "destination": "https://ru.491007.xyz",
+        "source": "/ru/",
+        "destination": "https://ru.491007.xyz/",
+        "statusCode": 302
+      },
+      {
+        "source": "/HEGEL/",
+        "destination": "https://ml.491007.xyz/HEGEL/",
+        "statusCode": 302
+      },
+      {
+        "source": "/MEGA/",
+        "destination": "https://de.491007.xyz/MEGA/",
+        "statusCode": 302
+      },
+      {
+        "source": "/MEW/",
+        "destination": "https://de.491007.xyz/MEW/",
         "statusCode": 302
       },
       {
         "source": "/ru/*",
         "destination": "https://ru.491007.xyz/:splat",
-        "statusCode": 302
-      },
-      {
-        "source": "/en/*",
-        "destination": "https://en.491007.xyz/:splat",
         "statusCode": 302
       },
       {
@@ -39,12 +49,6 @@
         "source": "/docs/*",
         "destination": "https://ml.491007.xyz/:splat",
         "statusCode": 302
-      }
-    ],
-    "rewrites": [
-      {
-        "source": "/:splat",
-        "destination": "/"
       }
     ]
 }
