@@ -290,7 +290,7 @@ class HTMLProcessor {
 
 // ── PrevNextResolver ───────────────────────────────────────────
 class PrevNextResolver {
-  constructor(root) { this.root = root; this.cache = new Map(); }
+  constructor(root, pathMatcher) { this.root = root; this.cache = new Map(); this.pm = pathMatcher; }
 
   async getLocalPrevNext(filePath) {
     const dir = path.dirname(filePath);
@@ -299,7 +299,7 @@ class PrevNextResolver {
     let files = [];
     try {
       const entries = await fs.readdir(path.join(this.root, dir), { withFileTypes: true });
-      files = entries.filter(e => e.isFile() && /\.html?$/i.test(e.name)).map(e => e.name).sort();
+      files = entries.filter(e => e.isFile() && /\.html?$/i.test() && this.pm.shouldBuild(e.name)).map(e => e.name).sort();
     } catch { }
 
     const titleMap = Object.fromEntries(await Promise.all(
@@ -641,7 +641,7 @@ class BuildEngine {
 
     const pathMatcher = new PathMatcher(args.only, args.copyOnly, args.skip);
     const scanner = new FileScanner(ROOT, pathMatcher);
-    const prevNextResolver = new PrevNextResolver(ROOT);
+    const prevNextResolver = new PrevNextResolver(ROOT, pathMatcher);
     const renderer = new PageRenderer(config, prevNextResolver, rawConfig);
     const volBuilder = new VolumeIndexBuilder(config);
     const volIndexPaths = volBuilder.collectVolumePaths(rawConfig);
