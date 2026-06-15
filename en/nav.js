@@ -201,6 +201,51 @@
   };
   Object.assign(window, { ReaderCore, $, $$, esc, syncFill, onScrollFrame });
 
+  const resolveLibraryPath = (col, group, item) => {
+    const raw = String(item?.path || '').trim();
+    if (raw) return raw;
+    const dir = String(item?.dir || '').trim();
+    const homePage = item?.homePage || 'index.html';
+    if (dir) return homePage === 'index.html' ? dir : PathResolver.logical(dir.replace(/\/?$/, '/'), homePage);
+    const id = item?.id;
+    if (id == null || id === '') return '';
+    const base = group?.basePath || col?.basePath || '';
+    if (!base) return raw;
+    return PathResolver.logical(PathResolver.logical(String(base).replace(/\/?$/, '/'), String(id).replace(/\/?$/, '/')), homePage);
+  };
+  Object.assign(ReaderCore, { resolveLibraryPath });
+
+  const detectVolume = (path, findcol = false) => {
+    let dir = normPath(String(path || '').replace(/[?#].*$/, '').replace(/^\/+/, ''));
+    dir = /\.[^/]+$/.test(dir.split('/').pop() || '') ? dir.replace(/\/[^/]+$/, '') : dir;
+    if (!dir) return null;
+    const source = window.LIBRARY_CONFIG || [];
+    const indexed = window.LIBRARY_INDEX?.byDir;
+    if (!indexed) return null;
+    let best = null;
+    for (;;) {
+      const coord = indexed[dir.replace(/^\/+/, '').toLowerCase()];
+      if (coord) {
+        const [colIndex, groupIndex, itemIndex] = Array.isArray(coord) ? coord : [];
+        let col = source[colIndex] || null;
+        const group = col?.groups?.[groupIndex] || null;
+        const item = itemIndex == null ? (group || col) : (group?.items?.[itemIndex] || null);
+        const entry = col && item ? { 
+          col, group, item, dir, path: resolveLibraryPath(col, group, item), colPath: resolveLibraryPath(col, null, col)
+        } : null;
+        if (findcol && entry?.col) return entry.col;
+        if (entry) {
+          best = entry;
+          break;
+        }
+      }
+      const next = dir.replace(/\/[^/]+$/, '');
+      if (!next || next === dir) break;
+      dir = next;
+    }
+    return best;
+  };
+
   /* MenuManager — SSG 版 */
   class MenuManager {
     constructor() {
@@ -285,7 +330,7 @@
       const c = normPath(PathResolver.stripRoot(location.pathname)), v = this.currentVol;
       const path = (v && c === v.dir) ? v.dir + '/index.html' : c;
       const file = path.split('/').pop().replace(/\.x?html?$/i, '') || 'index';
-      const isVol = v ? (c === v.dir || c === v.dir + '/index.html') : false;
+      const isVol = v ? (c.toLowerCase() === v.dir.toLowerCase() || c.toLowerCase() === v.dir.toLowerCase() + '/index.html') : false;
       return { path, dir: v?.dir || '', file, isVol };
     }
 
@@ -335,7 +380,7 @@
     }
     loadSection(item) {
       const col = (window.LIBRARY_CONFIG || []).find(c => c.id === item.dataset.section); if (!col) return;
-      const html = (col.groups || []).map(g => this.renderGroup(g)).join(''); if (!html) return;
+      const html = (col.groups || []).map(g => this.renderGroup(g, col)).join(''); if (!html) return;
       const ul = document.createElement('ul'); ul.className = 'sidebar-menu sidebar-menu--nested'; ul.innerHTML = html;
       item.appendChild(ul); item.dataset.loaded = 'true';
     }
@@ -360,25 +405,8 @@
     }
 
     /*  卷册检测 (unified 算法) */
-    detectVolume() {
-      const cur = normPath(PathResolver.stripRoot(location.pathname)), curL = cur.toLowerCase();
-      const matchDir = p => {
-        if (!p || /^https?:/i.test(p)) return null;
-        const ip = normPath(p).replace(/\/[^/]*$/i, ''); 
-        return (curL === ip.toLowerCase() || curL.startsWith(ip.toLowerCase() + '/')) ? ip : null;
-      };
-      let best = null;
-      const consider = (col, group, item, dir) => {
-        if (dir && (!best || dir.length > best.dir.length)) best = { col, group, item, dir }
-      };
-      for (const col of window.LIBRARY_CONFIG || []) {
-        consider(col, null, col, matchDir(col.path));
-        for (const g of col.groups || []) {
-          consider(col, g, g, matchDir(g.path))
-          for (const it of g.items || []) consider(col, g, it, matchDir(it.path))
-        }
-      }
-      return best;
+    detectVolume(path = PathResolver.stripRoot(location.pathname), findcol = false) {
+      return detectVolume(path, findcol);
     }
 
     /*  数据加载 (SSG: import only) */
@@ -409,13 +437,6 @@
       return { version: 1, title: this.currentVol?.item?.label || dir, files: raw, headings };
     }
 
-    /*  面包屑 parts 构建 */
-    _breadcrumbParts(col, item, data) {
-      const parts = [{ text: col.label, href: sitePath(col.path), expand: col.id }];
-      if (item && item !== col) parts.push({ text: item.label || item.title || data?.title || 'Contents', href: sitePath(item.path || (this.currentVol.dir + '/index.html')) });
-      return parts;
-    }
-
     /*  渲染入口 */
     async renderEpub() {
       const data = await this.fetchVolData(this.currentVol.dir);
@@ -429,7 +450,9 @@
         this.mode === 'page-toc' ? this.renderPageToc() : this.navTree.innerHTML = this.buildLibmap(); return;
       }
       this.currentVol.data = data;
-      const { col, item } = this.currentVol, tree = buildTree(data.headings || []), parts = this._breadcrumbParts(col, item, data);
+      const { col, item, colPath, path } = this.currentVol, tree = buildTree(data.headings || []);
+      const parts = [{ text: col.label, href: sitePath(colPath), expand: col.id }];
+      if (item && item !== col) parts.push({ text: item.label || data?.title || 'Contents', href: sitePath(path || (this.currentVol.dir + '/index.html')) });
       this.navTree.innerHTML = this.renderBreadcrumb(parts) + this.renderTree(tree, 'epub-toc') + '<div class="section-divider"><span>All works</span></div>' + this.buildLibmap();
     }
 
@@ -440,8 +463,9 @@
         this.navTree.innerHTML = this.buildLibmap(); 
         return
       }
-      const col = this._findCollection(), nodes = headings.map(h => ({ level: Number(h.tagName[1]) || 2, text: h.textContent.trim(), id: h.id, file: location.pathname.split('/').pop() }));
-      const parts = [{ text: col?.label || 'Library', href: col?.path ? sitePath(col.path) : '#', expand: col?.id }, { text: nodes[0]?.text || document.title }];
+      const col = this.currentVol?.col || null, nodes = headings.map(h => ({ level: Number(h.tagName[1]) || 2, text: h.textContent.trim(), id: h.id, file: location.pathname.split('/').pop() }));
+      const colPath = this.currentVol?.colPath || '';
+      const parts = [{ text: col?.label || 'Library', href: colPath ? sitePath(colPath) : '#', expand: col?.id }, { text: nodes[0]?.text || document.title }];
       this.navTree.innerHTML = this.renderBreadcrumb(parts) + this.renderTree(buildTree(nodes), 'page-toc') + '<div class="section-divider"><span>All works</span></div>' + this.buildLibmap();
     }
 
@@ -454,9 +478,9 @@
       }).join('') + '</div>';
     }
     _renderLink(path, label, badge = '') {
-      const ext = /^https?:/i.test(path || ''), p = normPath(path);
-      const href = ext ? esc(path) : sitePath(p);
-      const attrs = ext ? ' target="_blank" rel="noopener"' : ` data-path="${esc('/' + p)}"`;
+      const ext = /^https?:/i.test(path || '');
+      const href = ext ? esc(path) : sitePath(path);
+      const attrs = ext ? ' target="_blank" rel="noopener"' : ` data-path="${href}"`;
       return `<a href="${href}" class="sidebar-link"${attrs}>${esc(label || '')}${badge}</a>`;
     }
 
@@ -489,14 +513,15 @@
     renderSection(col) {
       const label = esc(col.label || col.title || col.id || ''), badge = col.badge ? ` <span class="sidebar-badge">${esc(col.badge)}</span>` : '';
       const groups = col.groups || [];
-      if (!groups.length && col.path) return `<li class="sidebar-item">${this._renderLink(col.path, col.label || col.title || col.id || '', badge)}</li>`;
+      const colPath = resolveLibraryPath(col, null, col);
+      if (!groups.length && colPath) return `<li class="sidebar-item">${this._renderLink(colPath, col.label || col.title || col.id || '', badge)}</li>`;
       if (groups.length) return `<li class="sidebar-item sidebar-item--category sidebar-item--collapsible" data-section="${esc(col.id)}" data-collapsed="true"><div class="sidebar-item-row"><span class="sidebar-category-label">${label}${badge}</span><button class="sidebar-caret" tabindex="0">\u25b8</button></div></li>`;
       return `<li class="sidebar-item"><span class="sidebar-category-label">${label}${badge}</span></li>`;
     }
-    renderGroup(g) {
+    renderGroup(g, col = null) {
       const label = esc(g.label || ''), items = g.items || [];
-      if (!items.length) return `<li class="sidebar-item">${this._renderLink(g.path, label)}</li>`;
-      return `<li class="sidebar-item sidebar-item--category sidebar-item--collapsible" data-collapsed="true"><div class="sidebar-item-row"><span class="sidebar-category-label">${label}</span><button class="sidebar-caret" tabindex="0">\u25b8</button></div><ul class="sidebar-menu sidebar-menu--nested">${items.map(it => `<li class="sidebar-item">${this._renderLink(it.path, it.label || it.title || '')}</li>`).join('')}</ul></li>`;
+      if (!items.length) return `<li class="sidebar-item">${this._renderLink(resolveLibraryPath(null, null, g), label)}</li>`;
+      return `<li class="sidebar-item sidebar-item--category sidebar-item--collapsible" data-collapsed="true"><div class="sidebar-item-row"><span class="sidebar-category-label">${label}</span><button class="sidebar-caret" tabindex="0">\u25b8</button></div><ul class="sidebar-menu sidebar-menu--nested">${items.map(it => `<li class="sidebar-item">${this._renderLink(resolveLibraryPath(col, g, it), it.label)}</li>`).join('')}</ul></li>`;
     }
 
     /*  TOC (unified) */
@@ -641,15 +666,6 @@
         item.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
         caret.textContent = collapsed ? '\u25be' : '\u25b8';
       });
-    }
-
-    /*  SSG 特有：合集查找 */
-    _findCollection() {
-      const path = normPath(PathResolver.stripRoot(location.pathname));
-      return (window.LIBRARY_CONFIG || []).find(c => {
-        const b = normPath(c.basePath || '');
-        return b && (path.startsWith(b) || path.toLowerCase().startsWith(b.toLowerCase()));
-      }) || null;
     }
 
     /*  SSG 特有：侧边栏开关 */
